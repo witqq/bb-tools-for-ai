@@ -744,3 +744,199 @@ export async function downloadArchive(project, repo, options = {}) {
 
   return response.data;
 }
+
+// ==================== PR MERGE ====================
+
+/**
+ * Смержить Pull Request
+ * Автоматически получает актуальную version PR перед мержем
+ * @param prId - ID PR
+ * @param options.project - проект
+ * @param options.repo - репозиторий
+ */
+export async function mergePullRequest(prId, options = {}) {
+  const client = createClient();
+  const project = options.project || PROJECT;
+  const repo = options.repo || REPO;
+
+  // Получаем актуальную version PR
+  const pr = await getPullRequest(prId, {project, repo});
+
+  const url = `/projects/${project}/repos/${repo}/pull-requests/${prId}/merge?version=${pr.version}`;
+
+  const response = await client.post(url, {}, {
+    headers: {
+      'X-Atlassian-Token': 'no-check'
+    }
+  });
+
+  if (options.deleteSourceBranch) {
+    const branchName = pr.fromRef?.displayId;
+    if (branchName) {
+      await deleteBranch(branchName, {project, repo});
+    }
+  }
+
+  return response.data;
+}
+
+/**
+ * Удалить ветку в Bitbucket через branch-utils API
+ * @param branchName - имя ветки (например "feature/my-branch")
+ * @param options.project - проект
+ * @param options.repo - репозиторий
+ */
+export async function deleteBranch(branchName, options = {}) {
+  const client = createClient();
+  const project = options.project || PROJECT;
+  const repo = options.repo || REPO;
+  const url = `${HOST}/rest/branch-utils/1.0/projects/${project}/repos/${repo}/branches`;
+
+  await client.delete(url, {
+    data: {
+      name: `refs/heads/${branchName}`,
+      dryRun: false
+    },
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Atlassian-Token': 'no-check'
+    }
+  });
+}
+
+// ==================== DEFAULT REVIEWERS ====================
+
+/**
+ * Получить список условий Default Reviewer
+ * @param options.project - проект
+ * @param options.repo - репозиторий
+ */
+export async function listDefaultReviewerConditions(options = {}) {
+  const client = createClient();
+  const project = options.project || PROJECT;
+  const repo = options.repo || REPO;
+  const url = `${HOST}/rest/default-reviewers/1.0/projects/${project}/repos/${repo}/conditions`;
+  const response = await client.get(url);
+  return response.data;
+}
+
+/**
+ * Добавить условие Default Reviewer
+ * @param options.branch - целевая ветка (например "dev")
+ * @param options.reviewerIds - массив числовых ID ревьюверов (например [1518])
+ * @param options.requiredApprovals - кол-во обязательных апрувов (по умолчанию 1)
+ * @param options.sourceBranch - исходная ветка (по умолчанию "any" = любая)
+ * @param options.project - проект
+ * @param options.repo - репозиторий
+ */
+export async function addDefaultReviewerCondition(options = {}) {
+  const client = createClient();
+  const project = options.project || PROJECT;
+  const repo = options.repo || REPO;
+  const url = `${HOST}/rest/default-reviewers/1.0/projects/${project}/repos/${repo}/condition`;
+
+  const body = {
+    sourceMatcher: {
+      id: options.sourceBranch || 'any',
+      type: {id: options.sourceBranch ? 'BRANCH' : 'ANY_REF'}
+    },
+    targetMatcher: {
+      id: options.branch,
+      type: {id: 'BRANCH'}
+    },
+    reviewers: (options.reviewerIds || []).map(id => ({id})),
+    requiredApprovals: options.requiredApprovals || 1
+  };
+
+  const response = await client.post(url, body);
+  return response.data;
+}
+
+/**
+ * Удалить условие Default Reviewer по ID
+ * @param conditionId - ID условия
+ * @param options.project - проект
+ * @param options.repo - репозиторий
+ */
+export async function deleteDefaultReviewerCondition(conditionId, options = {}) {
+  const client = createClient();
+  const project = options.project || PROJECT;
+  const repo = options.repo || REPO;
+  const url = `${HOST}/rest/default-reviewers/1.0/projects/${project}/repos/${repo}/condition/${conditionId}`;
+  const response = await client.delete(url);
+  return response.data;
+}
+
+// ==================== BRANCH RESTRICTIONS ====================
+
+/**
+ * Добавить ограничение на ветку
+ * @param options.type - тип ограничения ("no-deletes", "fast-forward-only", "pull-request-only", "read-only")
+ * @param options.branch - имя ветки (для matcher type BRANCH)
+ * @param options.pattern - паттерн веток (для matcher type PATTERN)
+ * @param options.users - массив username пользователей-исключений
+ * @param options.groups - массив групп-исключений
+ * @param options.project - проект
+ * @param options.repo - репозиторий
+ */
+export async function addBranchRestriction(options = {}) {
+  const client = createClient();
+  const project = options.project || PROJECT;
+  const repo = options.repo || REPO;
+  const url = `${HOST}/rest/branch-permissions/2.0/projects/${project}/repos/${repo}/restrictions`;
+
+  const matcherType = options.pattern ? 'PATTERN' : 'BRANCH';
+  const matcherId = options.pattern || options.branch;
+
+  const body = {
+    type: options.type || 'no-deletes',
+    matcher: {
+      id: matcherId,
+      type: {
+        id: matcherType,
+        ...(matcherType === 'PATTERN' ? {name: 'Pattern'} : {})
+      }
+    }
+  };
+
+  if (options.users && options.users.length > 0) {
+    body.users = options.users;
+  }
+  if (options.groups && options.groups.length > 0) {
+    body.groups = options.groups;
+  }
+
+  const response = await client.post(url, body);
+  return response.data;
+}
+
+/**
+ * Удалить ограничение на ветку по ID
+ * @param restrictionId - ID ограничения
+ * @param options.project - проект
+ * @param options.repo - репозиторий
+ */
+export async function deleteBranchRestriction(restrictionId, options = {}) {
+  const client = createClient();
+  const project = options.project || PROJECT;
+  const repo = options.repo || REPO;
+  const url = `${HOST}/rest/branch-permissions/2.0/projects/${project}/repos/${repo}/restrictions/${restrictionId}`;
+  const response = await client.delete(url);
+  return response.data;
+}
+
+/**
+ * Получить список ограничений на ветки
+ * @param options.project - проект
+ * @param options.repo - репозиторий
+ */
+export async function listBranchRestrictions(options = {}) {
+  const client = createClient();
+  const project = options.project || PROJECT;
+  const repo = options.repo || REPO;
+  const url = `${HOST}/rest/branch-permissions/2.0/projects/${project}/repos/${repo}/restrictions`;
+
+  const params = {limit: options.limit || 100};
+  const response = await client.get(url, {params});
+  return response.data;
+}

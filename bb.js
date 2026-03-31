@@ -1,11 +1,16 @@
 #!/usr/bin/env node
 import {Command} from 'commander';
 import {
+  addBranchRestriction,
+  addDefaultReviewerCondition,
   addInlineComment,
   addPullRequestComment,
   addReviewer,
   browseRepository,
   createPullRequest,
+  deleteBranchRestriction,
+  deleteDefaultReviewerCondition,
+  deleteBranch,
   getBuildStatus,
   getCloneUrl,
   getCurrentUser,
@@ -19,13 +24,17 @@ import {
   getPullRequestStats,
   getRepositoryFile,
   listBranches,
+  listBranchRestrictions,
+  listDefaultReviewerConditions,
   listProjects,
   listPullRequests,
   listRepositories,
+  mergePullRequest,
   replyToComment,
   searchUsers
 } from './src/client.js';
 import {hasToken, saveToken} from './src/token.js';
+import {saveConfig, hasConfig, detectFromGitRemote, loadConfigFile} from './src/config.js';
 import {createInterface} from 'readline';
 
 const program = new Command();
@@ -38,7 +47,7 @@ program
 // ==================== SETUP ====================
 program
   .command('setup')
-  .description('Setup Bitbucket access token')
+  .description('Setup Bitbucket server URL, project/repo and access token')
   .action(async () => {
     const rl = createInterface({
       input: process.stdin,
@@ -47,12 +56,68 @@ program
 
     const question = (prompt) => new Promise(resolve => rl.question(prompt, resolve));
 
-    console.log('=== Bitbucket Token Setup ===\n');
+    console.log('=== Bitbucket Setup ===\n');
 
+    const existingConfig = loadConfigFile();
+
+    // Host URL
+    if (existingConfig.host) {
+      console.log(`Current host: ${existingConfig.host}`);
+      const overwriteHost = await question('Overwrite host? (y/N): ');
+      if (overwriteHost.toLowerCase() === 'y') {
+        const host = await question('Enter Bitbucket Server URL (e.g. https://bb.example.com): ');
+        if (host && host.trim().startsWith('http')) {
+          saveConfig({host: host.trim()});
+          console.log('✓ Host saved.\n');
+        } else {
+          console.error('✗ Invalid URL');
+          rl.close();
+          process.exit(1);
+        }
+      }
+    } else {
+      const host = await question('Enter Bitbucket Server URL (e.g. https://bb.example.com): ');
+      if (!host || !host.trim().startsWith('http')) {
+        console.error('✗ Invalid URL');
+        rl.close();
+        process.exit(1);
+      }
+      saveConfig({host: host.trim()});
+      console.log('✓ Host saved.\n');
+    }
+
+    // Project & Repo
+    const gitInfo = detectFromGitRemote();
+    if (gitInfo.project && gitInfo.repo) {
+      console.log(`Detected from git remote: project=${gitInfo.project}, repo=${gitInfo.repo}`);
+      const override = await question('Override project/repo? (y/N): ');
+      if (override.toLowerCase() === 'y') {
+        const project = await question('Enter project key: ');
+        const repo = await question('Enter repo slug: ');
+        if (project.trim() && repo.trim()) {
+          saveConfig({project: project.trim(), repo: repo.trim()});
+          console.log('✓ Project/repo saved.\n');
+        }
+      }
+    } else {
+      console.log('Could not detect project/repo from git remote.');
+      const project = await question('Enter project key (e.g. pasec): ');
+      const repo = await question('Enter repo slug (e.g. planeta-access-front): ');
+      if (project.trim() && repo.trim()) {
+        saveConfig({project: project.trim(), repo: repo.trim()});
+        console.log('✓ Project/repo saved.\n');
+      } else {
+        console.error('✗ Project and repo are required');
+        rl.close();
+        process.exit(1);
+      }
+    }
+
+    // Token
     if (hasToken()) {
       const overwrite = await question('Token already exists. Overwrite? (y/N): ');
       if (overwrite.toLowerCase() !== 'y') {
-        console.log('Setup cancelled.');
+        console.log('\n✓ Setup complete!');
         rl.close();
         return;
       }
@@ -72,7 +137,7 @@ program
 
     saveToken(token.trim());
     console.log('\n✓ Setup complete! Token encrypted and saved.');
-    console.log('\nTry: bb pr:list');
+    console.log('\nTry: bb whoami');
 
     rl.close();
   });
@@ -1042,6 +1107,251 @@ program
       console.log(url);
     } catch (error) {
       console.error('✗ Error:', error.message);
+      process.exit(1);
+    }
+  });
+
+// ==================== PR GET (raw data) ====================
+program
+  .command('pr:get <id>')
+  .description('Get raw pull request data (id, version, refs, state)')
+  .option('--json', 'Output as JSON')
+  .action(async (id, options) => {
+    try {
+      const pr = await getPullRequest(id);
+
+      if (options.json) {
+        console.log(JSON.stringify(pr, null, 2));
+        return;
+      }
+
+      console.log('\n=== Pull Request ===\n');
+      console.log(`ID:          ${pr.id}`);
+      console.log(`Version:     ${pr.version}`);
+      console.log(`Title:       ${pr.title}`);
+      console.log(`State:       ${pr.state}`);
+      console.log(`Author:      ${pr.author?.user?.name}`);
+      console.log(`Branch:      ${pr.fromRef?.displayId} → ${pr.toRef?.displayId}`);
+      console.log(`From Commit: ${pr.fromRef?.latestCommit?.slice(0, 12)}`);
+      console.log(`To Commit:   ${pr.toRef?.latestCommit?.slice(0, 12)}`);
+      console.log();
+    } catch (error) {
+      console.error('✗ Error:', error.message);
+      process.exit(1);
+    }
+  });
+
+// ==================== PR MERGE ====================
+program
+  .command('pr:merge <id>')
+  .description('Merge a pull request (auto-fetches version)')
+  .option('--json', 'Output as JSON')
+  .option('--delete-source-branch', 'Delete source branch after merge')
+  .action(async (id, options) => {
+    try {
+      const result = await mergePullRequest(id, {
+        deleteSourceBranch: options.deleteSourceBranch
+      });
+
+      if (options.json) {
+        console.log(JSON.stringify(result, null, 2));
+        return;
+      }
+
+      console.log(`\n✓ PR #${id} merged successfully!`);
+      console.log(`State: ${result.state}`);
+      if (options.deleteSourceBranch) {
+        console.log(`Source branch deleted.`);
+      }
+      console.log();
+    } catch (error) {
+      const errMsg = error.response?.data?.errors?.[0]?.message || error.message;
+      console.error(`✗ Error merging PR #${id}: ${errMsg}`);
+      if (error.response?.data?.errors?.[0]?.vetoes) {
+        error.response.data.errors[0].vetoes.forEach(v => {
+          console.error(`   Veto: ${v.summaryMessage}`);
+        });
+      }
+      process.exit(1);
+    }
+  });
+
+// ==================== ADMIN: DEFAULT REVIEWERS ====================
+program
+  .command('admin:reviewer:list')
+  .description('List default reviewer conditions')
+  .option('--json', 'Output as JSON')
+  .action(async (options) => {
+    try {
+      const conditions = await listDefaultReviewerConditions();
+
+      if (options.json) {
+        console.log(JSON.stringify(conditions, null, 2));
+        return;
+      }
+
+      console.log('\n=== Default Reviewer Conditions ===\n');
+
+      if (!conditions || conditions.length === 0) {
+        console.log('No conditions found.\n');
+        return;
+      }
+
+      conditions.forEach(c => {
+        const reviewers = c.reviewers?.map(r => `${r.name} (id:${r.id})`).join(', ') || 'none';
+        console.log(`[${c.id}] ${c.sourceMatcher?.displayId || 'any'} → ${c.targetMatcher?.displayId || '?'}`);
+        console.log(`   Reviewers: ${reviewers}`);
+        console.log(`   Required approvals: ${c.requiredApprovals}`);
+        console.log();
+      });
+    } catch (error) {
+      console.error('✗ Error:', error.message);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('admin:reviewer:add')
+  .description('Add default reviewer condition for a branch')
+  .option('-b, --branch <branch>', 'Target branch name (required)')
+  .option('-r, --reviewer-id <id>', 'Reviewer user ID (numeric, can be used multiple times)', (val, acc) => {
+    acc.push(parseInt(val));
+    return acc;
+  }, [])
+  .option('-a, --approvals <number>', 'Required approvals', '1')
+  .option('--json', 'Output as JSON')
+  .action(async (options) => {
+    try {
+      if (!options.branch) {
+        console.error('✗ Error: --branch is required');
+        process.exit(1);
+      }
+      if (options.reviewerId.length === 0) {
+        console.error('✗ Error: at least one --reviewer-id is required');
+        process.exit(1);
+      }
+
+      const result = await addDefaultReviewerCondition({
+        branch: options.branch,
+        reviewerIds: options.reviewerId,
+        requiredApprovals: parseInt(options.approvals)
+      });
+
+      if (options.json) {
+        console.log(JSON.stringify(result, null, 2));
+        return;
+      }
+
+      console.log(`\n✓ Default reviewer condition created (id: ${result.id})`);
+      console.log(`   Target branch: ${options.branch}`);
+      console.log(`   Reviewer IDs: ${options.reviewerId.join(', ')}`);
+      console.log(`   Required approvals: ${options.approvals}`);
+      console.log();
+    } catch (error) {
+      console.error('✗ Error:', error.response?.data?.errors?.[0]?.message || error.message);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('admin:reviewer:delete <conditionId>')
+  .description('Delete default reviewer condition')
+  .action(async (conditionId) => {
+    try {
+      await deleteDefaultReviewerCondition(conditionId);
+      console.log(`✓ Default reviewer condition ${conditionId} deleted`);
+    } catch (error) {
+      console.error('✗ Error:', error.response?.data?.errors?.[0]?.message || error.message);
+      process.exit(1);
+    }
+  });
+
+// ==================== ADMIN: BRANCH RESTRICTIONS ====================
+program
+  .command('admin:restriction:list')
+  .description('List branch restrictions')
+  .option('--json', 'Output as JSON')
+  .action(async (options) => {
+    try {
+      const result = await listBranchRestrictions();
+      const restrictions = result.values || [];
+
+      if (options.json) {
+        console.log(JSON.stringify(restrictions, null, 2));
+        return;
+      }
+
+      console.log('\n=== Branch Restrictions ===\n');
+
+      if (restrictions.length === 0) {
+        console.log('No restrictions found.\n');
+        return;
+      }
+
+      restrictions.forEach(r => {
+        const users = r.users?.map(u => u.name || u).join(', ') || 'none';
+        console.log(`[${r.id}] ${r.type} on ${r.matcher?.displayId || r.matcher?.id || '?'} (${r.matcher?.type?.id})`);
+        console.log(`   Users: ${users}`);
+        console.log();
+      });
+    } catch (error) {
+      console.error('✗ Error:', error.message);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('admin:restriction:add')
+  .description('Add branch restriction')
+  .option('-b, --branch <branch>', 'Branch name (mutually exclusive with --pattern)')
+  .option('-p, --pattern <pattern>', 'Branch pattern (mutually exclusive with --branch)')
+  .option('-t, --type <type>', 'Restriction type (no-deletes, fast-forward-only, pull-request-only, read-only)', 'no-deletes')
+  .option('-u, --user <username>', 'Exception user (can be used multiple times)', (val, acc) => {
+    acc.push(val);
+    return acc;
+  }, [])
+  .option('--json', 'Output as JSON')
+  .action(async (options) => {
+    try {
+      if (!options.branch && !options.pattern) {
+        console.error('✗ Error: --branch or --pattern is required');
+        process.exit(1);
+      }
+
+      const result = await addBranchRestriction({
+        branch: options.branch,
+        pattern: options.pattern,
+        type: options.type,
+        users: options.user
+      });
+
+      if (options.json) {
+        console.log(JSON.stringify(result, null, 2));
+        return;
+      }
+
+      console.log(`\n✓ Branch restriction created (id: ${result.id})`);
+      console.log(`   Type: ${options.type}`);
+      console.log(`   Target: ${options.branch || options.pattern}`);
+      if (options.user.length > 0) {
+        console.log(`   Exception users: ${options.user.join(', ')}`);
+      }
+      console.log();
+    } catch (error) {
+      console.error('✗ Error:', error.response?.data?.errors?.[0]?.message || error.message);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('admin:restriction:delete <restrictionId>')
+  .description('Delete branch restriction')
+  .action(async (restrictionId) => {
+    try {
+      await deleteBranchRestriction(restrictionId);
+      console.log(`✓ Branch restriction ${restrictionId} deleted`);
+    } catch (error) {
+      console.error('✗ Error:', error.response?.data?.errors?.[0]?.message || error.message);
       process.exit(1);
     }
   });
