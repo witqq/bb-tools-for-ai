@@ -1,4 +1,5 @@
 node_modules/
 .token
+.bbconfig
 .supervisor_logs/
 *.log
