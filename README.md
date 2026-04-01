@@ -8,7 +8,42 @@ CLI for Bitbucket Server API. Pull request management, code review workflows, an
 - Access to a Bitbucket Server instance
 - Personal Access Token with READ permissions
 
+## Quick Start
+
+```bash
+# Install globally
+npm install -g bb-tools-for-ai
+
+# Or run directly with npx (no install needed)
+npx bb-tools-for-ai setup
+
+# Setup your Bitbucket server connection
+bb setup
+
+# Start using
+bb whoami
+bb pr:list
+bb reviews
+```
+
 ## Installation
+
+### npm (recommended)
+
+```bash
+npm install -g bb-tools-for-ai
+bb setup
+```
+
+### npx (no install)
+
+```bash
+npx bb-tools-for-ai setup
+npx bb-tools-for-ai pr:list
+npx bb-tools-for-ai reviews
+```
+
+### From source
 
 ```bash
 git clone https://github.com/witqq/bb-tools-for-ai.git
@@ -21,26 +56,18 @@ After `npm link`, the `bb` command is available globally.
 
 ## Configuration
 
-### 1. Set your Bitbucket Server
-
-Edit `src/config.js`:
-
-```js
-export const BITBUCKET_CONFIG = {
-  HOST: 'https://bitbucket.your-company.com',
-  BASE_URL: 'https://bitbucket.your-company.com/rest/api/1.0',
-  PROJECT: 'MYPROJECT',
-  REPO: 'my-repo'
-};
-```
-
-### 2. Set up token
+Run the interactive setup wizard:
 
 ```bash
 bb setup
 ```
 
-The token is stored locally in `.token` file (XOR + base64 encoded, not committed to git).
+The wizard will:
+1. Ask for your Bitbucket Server URL
+2. Auto-detect project and repository from `git remote`
+3. Prompt for your Personal Access Token
+
+Configuration is saved to `.bbconfig` and `.token` in your current working directory.
 
 ## Commands
 
@@ -151,6 +178,7 @@ bb-tools-for-ai/
 │   └── analysis/         # Analysis scripts
 │       ├── developer-profile.js
 │       └── reviewer-comments.js
+├── .bbconfig             # Server config (not committed)
 ├── .token                # Encrypted token (not committed)
 └── package.json
 ```

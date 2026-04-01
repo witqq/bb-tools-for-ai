@@ -4,16 +4,35 @@ CLI for Bitbucket Server API.
 
 ## Installation
 
+### npm (recommended)
+
+```bash
+npm install -g bb-tools-for-ai
+```
+
+### npx (no install)
+
+```bash
+npx bb-tools-for-ai <command>
+```
+
+### From source
+
 ```bash
 cd bb-tools-for-ai
 npm install
+npm link
 ```
 
 ## Initial setup
 
 ```bash
 bb setup
+# Or with npx:
+npx bb-tools-for-ai setup
 ```
+
+The wizard asks for Bitbucket Server URL, auto-detects project/repo from git remote, and prompts for your access token. Config saved to `.bbconfig` and `.token` in current directory.
 
 ## Commands
 
@@ -139,10 +158,11 @@ bb pr:create --title "Title" -r reviewer1 -r reviewer2
 bb pr:reviewer 123 --add jsmith
 ```
 
-## Global installation
+## Global availability
+
+After `npm install -g bb-tools-for-ai` or `npm link` (from source), the `bb` command is available globally:
 
 ```bash
-npm link
 bb whoami
 bb reviews
 bb pr:list

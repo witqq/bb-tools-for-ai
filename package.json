@@ -1,13 +1,41 @@
 {
   "name": "bb-tools-for-ai",
   "version": "1.0.0",
-  "description": "CLI tools for Bitbucket Server API automation",
+  "description": "CLI tools for Bitbucket Server API automation — pull request management, code review workflows, and developer analytics",
   "type": "module",
   "bin": {
     "bb": "./bb.js"
   },
+  "files": [
+    "bb.js",
+    "src/",
+    "scripts/"
+  ],
   "scripts": {
     "setup": "node bb.js setup"
+  },
+  "keywords": [
+    "bitbucket",
+    "bitbucket-server",
+    "cli",
+    "pull-request",
+    "code-review",
+    "developer-tools",
+    "api",
+    "automation"
+  ],
+  "author": "witqq",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/witqq/bb-tools-for-ai.git"
+  },
+  "homepage": "https://github.com/witqq/bb-tools-for-ai#readme",
+  "bugs": {
+    "url": "https://github.com/witqq/bb-tools-for-ai/issues"
+  },
+  "engines": {
+    "node": ">=18"
   },
   "dependencies": {
     "axios": "^1.6.0",

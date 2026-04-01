@@ -2,6 +2,13 @@
 
 CLI for Bitbucket Server API.
 
+## Setup
+
+```bash
+npm install -g bb-tools-for-ai   # or: npx bb-tools-for-ai setup
+bb setup                          # interactive wizard: URL, project/repo auto-detect, token
+```
+
 ## Commands
 
 ```bash
@@ -52,8 +59,8 @@ Configure repositories in `src/client.js` `ALL_REPOS` array. Use `--all-repos` f
 
 ## Global availability
 
-After `npm link` the `bb` command is available globally.
+After `npm install -g bb-tools-for-ai` or `npm link` (from source), the `bb` command is available globally. With npx, use `npx bb-tools-for-ai <command>`.
 
 ## Full documentation
 
-See `USAGE.md` in the project directory.
+See `USAGE.md` for full command reference or `README.md` for setup guide.
